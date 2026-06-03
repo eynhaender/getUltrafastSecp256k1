@@ -35,7 +35,7 @@ Analogous to [eynhaender/getboost](https://github.com/eynhaender/getboost).
 
 1. **build.ps1** clones `shrec/UltrafastSecp256k1` (branch `dev`) and runs CMake
    with the Visual Studio 2026 generator for every combination of:
-   - Architecture: x64, x86
+   - Architecture: x64 (the library uses x64-only intrinsics; Win32 is not supported)
    - Link type: static, shared
    - Configuration: Release, Debug
 
@@ -55,7 +55,6 @@ build/native/
     include/ufsecp/
 lib/native/
     x64/{Release,Debug}/{static,shared}/
-    x86/{Release,Debug}/{static,shared}/
 ```
 
 ## Consuming the package

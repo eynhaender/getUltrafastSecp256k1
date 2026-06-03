@@ -45,7 +45,11 @@ internal static class Config
     // -----------------------------------------------------------------------
 
     /// <summary>Architecture directory names inside _staging/.</summary>
-    public static readonly string[] Archs = { "x64", "x86" };
+    /// <remarks>
+    /// UltrafastSecp256k1 uses x64-only intrinsics (_umul128, _mulx_u64 …)
+    /// and cannot be compiled for Win32/x86.
+    /// </remarks>
+    public static readonly string[] Archs = { "x64" };
 
     /// <summary>Configuration directory names inside _staging/.</summary>
     public static readonly string[] Configs = { "Release", "Debug" };

@@ -5,9 +5,12 @@
 
 .DESCRIPTION
     Clones shrec/UltrafastSecp256k1 (branch: dev), builds with CMake and the
-    Visual Studio 2026 generator (vc145) for x64 + x86 in Release/Debug x
+    Visual Studio 2026 generator (vc145) for x64 in Release/Debug x
     static/shared, installs to _staging/, then invokes the C# builder to
     produce the .nupkg.
+
+    Note: UltrafastSecp256k1 uses x64-only intrinsics and cannot be
+    compiled for Win32/x86.
 
 .PARAMETER Version
     Version override. Default: read from source VERSION.txt.
@@ -28,7 +31,7 @@
     After staging, build the C# builder and produce the .nupkg.
 
 .EXAMPLE
-    # Full run — clone, build, package
+    # Full run: clone, build, package
     .\build.ps1 -Pack
 
 .EXAMPLE
@@ -52,7 +55,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 # ---------------------------------------------------------------------------
-# Paths — all relative to the repository root
+# Paths -- all relative to the repository root
 # ---------------------------------------------------------------------------
 $repoRoot   = $PSScriptRoot
 $sourceDir  = Join-Path $repoRoot "_source\UltrafastSecp256k1"
@@ -67,11 +70,10 @@ $stagingDir = Join-Path $repoRoot "_staging"
 if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
     $vswhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
     if (Test-Path $vswhere) {
-        $vsRoot  = & $vswhere -latest -property installationPath 2>$null
-        $cmakeDir = Join-Path $vsRoot `
-            "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin"
+        $vsRoot   = & $vswhere -latest -property installationPath 2>$null
+        $cmakeDir = Join-Path $vsRoot "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin"
         if (Test-Path $cmakeDir) {
-            $env:PATH = "$cmakeDir;$env:PATH"
+            $env:PATH = $cmakeDir + ";" + $env:PATH
             Write-Host "cmake added from: $cmakeDir"
         }
     }
@@ -81,11 +83,38 @@ if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
 }
 
 # ---------------------------------------------------------------------------
+# nuget.exe discovery / auto-download
+# Checks (in order): PATH -> tools/nuget.exe -> download from dist.nuget.org
+# ---------------------------------------------------------------------------
+if (-not (Get-Command nuget -ErrorAction SilentlyContinue)) {
+    $toolsDir  = Join-Path $repoRoot "tools"
+    $nugetTool = Join-Path $toolsDir "nuget.exe"
+    if (-not (Test-Path $nugetTool)) {
+        Write-Host "nuget.exe not found -- downloading to tools/nuget.exe ..."
+        New-Item -ItemType Directory -Force $toolsDir | Out-Null
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        Invoke-WebRequest `
+            -Uri "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe" `
+            -OutFile $nugetTool -UseBasicParsing
+        $ErrorActionPreference = $prev
+    }
+    $env:PATH = $toolsDir + ";" + $env:PATH
+    Write-Host "nuget added from: $toolsDir"
+}
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 function Invoke-Cmake {
     param([string[]] $Arguments)
+    # PS 5.1 wraps native-process stderr as NativeCommandError objects.
+    # Temporarily use "Continue" so cmake's CMake Warning messages do not
+    # trigger $ErrorActionPreference = "Stop" and kill the script.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     & cmake @Arguments
+    $ErrorActionPreference = $prev
     if ($LASTEXITCODE -ne 0) { throw "cmake exited with code $LASTEXITCODE" }
 }
 
@@ -135,19 +164,20 @@ if (-not $Version) {
 Write-Host "Version: $Version"
 
 # ---------------------------------------------------------------------------
-# 3. Build matrix: 2 arch x 2 link-types -> configure once, install twice
+# 3. Build matrix: arch x link-type -> configure once, install twice
 #
 #    Each (arch, linktype) pair is configured once with the VS multi-config
 #    generator, then built and installed separately for Release and Debug.
 #    The install prefix encodes (arch, linktype, config) so the builder can
 #    locate every variant unambiguously.
+#
+#    x64 only: UltrafastSecp256k1 uses x64-only intrinsics (_umul128,
+#    _mulx_u64, etc.) and cannot be compiled for Win32/x86.
 # ---------------------------------------------------------------------------
 if (-not $SkipBuild) {
 
-    # CMake -A values and staging directory names
     $archs = @(
-        [pscustomobject]@{ CMakeArch = "x64";   Dir = "x64" }
-        [pscustomobject]@{ CMakeArch = "Win32"; Dir = "x86" }
+        [pscustomobject]@{ CMakeArch = "x64"; Dir = "x64" }
     )
 
     # SECP256K1_BUILD_SHARED controls shared vs static in this project
@@ -159,10 +189,10 @@ if (-not $SkipBuild) {
     foreach ($arch in $archs) {
         foreach ($link in $linkTypes) {
 
-            $buildDir = Join-Path $buildRoot "$($arch.Dir)_$($link.Dir)"
+            $buildDir = Join-Path $buildRoot ($arch.Dir + "_" + $link.Dir)
 
             # ---- Configure ------------------------------------------------
-            Write-Step "Configure  arch=$($arch.Dir)  link=$($link.Dir)"
+            Write-Step ("Configure  arch=" + $arch.Dir + "  link=" + $link.Dir)
             Invoke-Cmake @(
                 "-S", $sourceDir,
                 "-B", $buildDir,
@@ -171,7 +201,7 @@ if (-not $SkipBuild) {
                 # Debug libs get a 'd' suffix so Release and Debug can coexist
                 "-DCMAKE_DEBUG_POSTFIX=d",
                 # Shared vs static
-                "-DSECP256K1_BUILD_SHARED=$($link.BuildShared)",
+                ("-DSECP256K1_BUILD_SHARED=" + $link.BuildShared),
                 # Components to build
                 "-DSECP256K1_BUILD_CPU=ON",
                 "-DSECP256K1_BUILD_CABI=ON",
@@ -192,22 +222,13 @@ if (-not $SkipBuild) {
             # ---- Build + Install per config -------------------------------
             foreach ($config in @("Release", "Debug")) {
 
-                $installPrefix = Join-Path $stagingDir `
-                    "$($arch.Dir)\$($link.Dir)\$config"
+                $installPrefix = Join-Path $stagingDir ($arch.Dir + "\" + $link.Dir + "\" + $config)
 
-                Write-Step "Build+Install  $($arch.Dir)/$($link.Dir)/$config"
+                Write-Step ("Build+Install  " + $arch.Dir + "/" + $link.Dir + "/" + $config)
 
-                Invoke-Cmake @(
-                    "--build", $buildDir,
-                    "--config", $config,
-                    "--parallel"
-                )
+                Invoke-Cmake @("--build", $buildDir, "--config", $config, "--parallel")
 
-                Invoke-Cmake @(
-                    "--install", $buildDir,
-                    "--config",  $config,
-                    "--prefix",  $installPrefix
-                )
+                Invoke-Cmake @("--install", $buildDir, "--config", $config, "--prefix", $installPrefix)
             }
         }
     }
@@ -226,8 +247,7 @@ if ($Pack) {
     if ($LASTEXITCODE -ne 0) { throw "dotnet build failed" }
 
     Write-Step "Generate .targets + .nuspec + pack"
-    $builderExe = Join-Path $repoRoot `
-        "builder\builder\bin\Release\net8.0\builder.exe"
+    $builderExe = Join-Path $repoRoot "builder\builder\bin\Release\net9.0-windows\builder.exe"
     & $builderExe `
         --staging $stagingDir `
         --output  $repoRoot   `
