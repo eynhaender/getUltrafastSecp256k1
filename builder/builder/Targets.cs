@@ -3,9 +3,22 @@ using builder;
 
 /// <summary>
 /// Generates the MSBuild .targets file that NuGet auto-imports into consumer
-/// projects.  The file sets up include paths and, conditionally on Platform,
-/// Configuration, and UltrafastSecp256k1LinkType, wires in the correct .lib
-/// files and copies .dll files to the output directory.
+/// projects.
+///
+/// Design (analogous to libbitcoin/secp256k1 packaging/nuget/package.targets):
+///
+///   - package.xml drives a "Linkage" drop-down in the VS project properties
+///     UI.  The resulting MSBuild property is $(Linkage-UltrafastSecp256k1).
+///
+///   - Include paths and lib dirs are only injected when a linkage mode is
+///     selected (i.e. NOT "Not linked").
+///
+///   - Declared properties (UltrafastSecp256k1_IncludeDir, _StaticLibDir,
+///     _SharedLibDir) keep the per-variant ItemDefinitionGroups concise.
+///
+///   - Both include\ and include\ufsecp\ are added to AdditionalIncludeDirectories
+///     so that relative includes inside ufsecp_libbitcoin.h (e.g. "ufsecp_error.h")
+///     resolve correctly.
 /// </summary>
 internal static class Targets
 {
@@ -17,131 +30,143 @@ internal static class Targets
         string targetsDir = Path.Combine(packageDir, "build", "native");
         Directory.CreateDirectory(targetsDir);
 
-        // Headers are the same for all variants; take them from the canonical
-        // location (x64/static/Release) which is always built first.
+        // Headers: copy from canonical staging location (x64/static/Release).
+        // Covers secp256k1/, ufsecp/, ufsecp_libbitcoin.h, secp256k1_shim *.h
         string headerSrc = Path.Combine(
             Config.StagingDir, "x64", "static", "Release", "include");
         string headerDst = Path.Combine(targetsDir, "include");
         CopyDirectory(headerSrc, headerDst);
 
-        // Build the XML document
         var project = new XElement(Ns + "Project",
-            DefaultLinkTypeProperty(),
-            UnconditionalIncludeGroup());
 
-        foreach (string arch    in Config.Archs)
-        foreach (string config  in Config.Configs)
-        foreach (string linkType in Config.LinkTypes)
-        {
-            project.Add(LibItemDefinitionGroup(arch, config, linkType));
+            // Load the property-page schema so VS shows the Linkage drop-down
+            new XElement(Ns + "ItemGroup",
+                new XElement(Ns + "PropertyPageSchema",
+                    new XAttribute("Include",
+                        @"$(MSBuildThisFileDirectory)package.xml"))),
 
-            if (linkType == "shared")
-                project.Add(DllCopyItemGroup(arch, config));
-        }
+            // Base directories — evaluated lazily by MSBuild at build time
+            new XElement(Ns + "PropertyGroup",
+                new XElement(Ns + "UltrafastSecp256k1_IncludeDir",
+                    @"$(MSBuildThisFileDirectory)include\"),
+                new XElement(Ns + "UltrafastSecp256k1_StaticLibDir",
+                    @"$(MSBuildThisFileDirectory)..\..\lib\native\x64\$(Configuration)\static\"),
+                new XElement(Ns + "UltrafastSecp256k1_SharedLibDir",
+                    @"$(MSBuildThisFileDirectory)..\..\lib\native\x64\$(Configuration)\shared\")),
+
+            // Include paths — only when linked (any non-empty linkage value).
+            // Add both include\ and include\ufsecp\ so that headers inside
+            // ufsecp/ that use relative includes (e.g. "ufsecp_error.h") work.
+            new XElement(Ns + "ItemDefinitionGroup",
+                new XAttribute("Condition", "'$(Linkage-UltrafastSecp256k1)' != ''"),
+                new XElement(Ns + "ClCompile",
+                    new XElement(Ns + "AdditionalIncludeDirectories",
+                        @"$(UltrafastSecp256k1_IncludeDir);$(UltrafastSecp256k1_IncludeDir)ufsecp\;%(AdditionalIncludeDirectories)"))),
+
+            // Static: preprocessor define + lib directory
+            new XElement(Ns + "ItemDefinitionGroup",
+                new XAttribute("Condition",
+                    "'$(Linkage-UltrafastSecp256k1)' == 'static'"),
+                new XElement(Ns + "ClCompile",
+                    new XElement(Ns + "PreprocessorDefinitions",
+                        "UFSECP_STATIC;%(PreprocessorDefinitions)")),
+                new XElement(Ns + "Link",
+                    new XElement(Ns + "AdditionalLibraryDirectories",
+                        @"$(UltrafastSecp256k1_StaticLibDir);%(AdditionalLibraryDirectories)"))),
+
+            StaticLibGroup("Release"),
+            StaticLibGroup("Debug"),
+
+            // Dynamic: lib directory
+            new XElement(Ns + "ItemDefinitionGroup",
+                new XAttribute("Condition",
+                    "'$(Linkage-UltrafastSecp256k1)' == 'dynamic'"),
+                new XElement(Ns + "Link",
+                    new XElement(Ns + "AdditionalLibraryDirectories",
+                        @"$(UltrafastSecp256k1_SharedLibDir);%(AdditionalLibraryDirectories)"))),
+
+            SharedLibGroup("Release"),
+            SharedLibGroup("Debug"),
+
+            DllCopyGroup("Release"),
+            DllCopyGroup("Debug")
+        );
 
         var doc = new XDocument(
             new XDeclaration("1.0", "utf-8", null),
             project);
 
-        string targetsFile = Path.Combine(targetsDir, $"{Config.PackageId}.targets");
+        string targetsFile = Path.Combine(
+            targetsDir, $"{Config.PackageId}.targets");
         doc.Save(targetsFile);
         Console.WriteLine($"Written: {targetsFile}");
     }
 
     // -----------------------------------------------------------------------
-    // XML helpers
+    // Static lib filenames — scanned from staging so the file stays correct
+    // even if CMake output names change in a future version.
     // -----------------------------------------------------------------------
 
-    /// <summary>
-    /// Default value for the consumer-facing UltrafastSecp256k1LinkType property.
-    /// Static is the default because libbitcoin only links statically.
-    /// </summary>
-    private static XElement DefaultLinkTypeProperty() =>
-        new XElement(Ns + "PropertyGroup",
-            new XAttribute("Condition", "'$(UltrafastSecp256k1LinkType)' == ''"),
-            new XElement(Ns + "UltrafastSecp256k1LinkType", "Static"));
-
-    /// <summary>
-    /// Adds the header directory to AdditionalIncludeDirectories for every
-    /// project that imports this .targets file, regardless of platform or config.
-    /// </summary>
-    private static XElement UnconditionalIncludeGroup() =>
-        new XElement(Ns + "ItemDefinitionGroup",
-            new XElement(Ns + "ClCompile",
-                new XElement(Ns + "AdditionalIncludeDirectories",
-                    @"$(MSBuildThisFileDirectory)include;%(AdditionalIncludeDirectories)")));
-
-    /// <summary>
-    /// One ItemDefinitionGroup that links the correct .lib files for a given
-    /// (arch, config, linkType) combination.  The .lib file names are discovered
-    /// by scanning the staging directory so the targets file stays correct even
-    /// if CMake renames an output.
-    /// </summary>
-    private static XElement LibItemDefinitionGroup(
-        string arch, string config, string linkType)
+    private static XElement StaticLibGroup(string config)
     {
-        string platform  = Config.MsbuildPlatform(arch);
-        string linkCond  = linkType == "static"
-            ? "'$(UltrafastSecp256k1LinkType)' != 'Shared'"
-            : "'$(UltrafastSecp256k1LinkType)' == 'Shared'";
+        string libDir = Path.Combine(
+            Config.StagingDir, "x64", "static", config, "lib");
 
-        string condition =
-            $"'$(Platform)' == '{platform}' And " +
-            $"'$(Configuration)' == '{config}' And " +
-            $"{linkCond}";
+        var names = ScanLibNames(libDir);
+        if (names.Count == 0)
+            Console.WriteLine($"WARNING: no .lib found for static/{config}");
 
-        // Scan staging for the actual .lib names produced by CMake
-        string libStagingDir = Path.Combine(
-            Config.StagingDir, arch, linkType, config, "lib");
-
-        var libPaths = new List<string>();
-        if (Directory.Exists(libStagingDir))
-        {
-            libPaths = Directory
-                .GetFiles(libStagingDir, "*.lib")
-                .Select(f =>
-                    // Path relative to $(MSBuildThisFileDirectory) = build/native/
-                    $@"$(MSBuildThisFileDirectory)..\..\lib\native\{arch}\{config}\{linkType}\{Path.GetFileName(f)}")
-                .ToList();
-        }
-
-        if (libPaths.Count == 0)
-            Console.WriteLine(
-                $"WARNING: No .lib files found for {arch}/{linkType}/{config}");
-
-        string deps = string.Join(";", libPaths) + ";%(AdditionalDependencies)";
+        string deps = string.Join(";", names) + ";%(AdditionalDependencies)";
 
         return new XElement(Ns + "ItemDefinitionGroup",
-            new XAttribute("Condition", condition),
+            new XAttribute("Condition",
+                $"'$(Linkage-UltrafastSecp256k1)' == 'static' And '$(Configuration)' == '{config}'"),
             new XElement(Ns + "Link",
                 new XElement(Ns + "AdditionalDependencies", deps)));
     }
 
-    /// <summary>
-    /// For shared builds, instructs MSBuild to copy the .dll to the output
-    /// directory so the executable can find it at runtime.
-    /// </summary>
-    private static XElement DllCopyItemGroup(string arch, string config)
+    // -----------------------------------------------------------------------
+    // Shared (import lib) filenames
+    // -----------------------------------------------------------------------
+
+    private static XElement SharedLibGroup(string config)
     {
-        string platform  = Config.MsbuildPlatform(arch);
+        string libDir = Path.Combine(
+            Config.StagingDir, "x64", "shared", config, "lib");
+
+        // Only include .lib files (import libs), not .dll
+        var names = ScanLibNames(libDir);
+
+        string deps = string.Join(";", names) + ";%(AdditionalDependencies)";
+
+        return new XElement(Ns + "ItemDefinitionGroup",
+            new XAttribute("Condition",
+                $"'$(Linkage-UltrafastSecp256k1)' == 'dynamic' And '$(Configuration)' == '{config}'"),
+            new XElement(Ns + "Link",
+                new XElement(Ns + "AdditionalDependencies", deps)));
+    }
+
+    // -----------------------------------------------------------------------
+    // DLL copy — copies shared library to the build output directory
+    // -----------------------------------------------------------------------
+
+    private static XElement DllCopyGroup(string config)
+    {
         string condition =
-            $"'$(Platform)' == '{platform}' And " +
-            $"'$(Configuration)' == '{config}' And " +
-            $"'$(UltrafastSecp256k1LinkType)' == 'Shared'";
+            $"'$(Linkage-UltrafastSecp256k1)' == 'dynamic' And '$(Configuration)' == '{config}'";
 
         var group = new XElement(Ns + "ItemGroup",
             new XAttribute("Condition", condition));
 
-        string dllStagingDir = Path.Combine(
-            Config.StagingDir, arch, "shared", config, "lib");
+        string dllDir = Path.Combine(
+            Config.StagingDir, "x64", "shared", config, "lib");
 
-        if (Directory.Exists(dllStagingDir))
+        if (Directory.Exists(dllDir))
         {
-            foreach (string dll in Directory.GetFiles(dllStagingDir, "*.dll"))
+            foreach (string dll in Directory.GetFiles(dllDir, "*.dll"))
             {
                 string pkgPath =
-                    $@"$(MSBuildThisFileDirectory)..\..\lib\native\{arch}\{config}\shared\{Path.GetFileName(dll)}";
-
+                    $@"$(UltrafastSecp256k1_SharedLibDir){Path.GetFileName(dll)}";
                 group.Add(new XElement(Ns + "None",
                     new XAttribute("Include", pkgPath),
                     new XElement(Ns + "CopyToOutputDirectory", "PreserveNewest"),
@@ -153,14 +178,27 @@ internal static class Targets
     }
 
     // -----------------------------------------------------------------------
-    // File utilities
+    // Helpers
     // -----------------------------------------------------------------------
+
+    /// <summary>Returns just the filenames (no paths) of all .lib files.</summary>
+    private static List<string> ScanLibNames(string dir)
+    {
+        if (!Directory.Exists(dir))
+            return new List<string>();
+
+        return Directory.GetFiles(dir, "*.lib")
+            .Select(Path.GetFileName)
+            .Where(n => n is not null)
+            .Select(n => n!)
+            .ToList();
+    }
 
     private static void CopyDirectory(string src, string dst)
     {
         if (!Directory.Exists(src))
         {
-            Console.WriteLine($"WARNING: Header source directory not found: {src}");
+            Console.WriteLine($"WARNING: Header source not found: {src}");
             return;
         }
 

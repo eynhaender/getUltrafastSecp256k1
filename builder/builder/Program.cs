@@ -29,10 +29,13 @@ if (!Directory.Exists(Config.StagingDir))    Die($"Staging directory not found: 
 string packageDir = Path.Combine(Config.OutputDir, "_package");
 Directory.CreateDirectory(packageDir);
 
-// 1. Generate the MSBuild .targets file and copy headers into _package/
+// 1. Generate package.xml (VS property-page schema for the Linkage drop-down)
+PackageXml.Generate(packageDir);
+
+// 2. Generate the MSBuild .targets file and copy headers into _package/
 Targets.Generate(packageDir);
 
-// 2. Generate the .nuspec and call nuget.exe pack
+// 3. Generate the .nuspec and call nuget.exe pack
 Nuspec.Create(packageDir);
 
 static void Die(string message)

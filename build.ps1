@@ -278,6 +278,22 @@ if (-not $SkipBuild) {
     $headerDst    = Join-Path $stagingDir "x64\static\Release\include\ufsecp_libbitcoin.h"
     Copy-Item $bridgeHeader $headerDst -Force
     Write-Host "Bridge header copied to staging."
+
+    # -------------------------------------------------------------------------
+    # 3c. libsecp256k1 shim headers
+    #
+    #     compat/libsecp256k1_shim/include/ contains the standard secp256k1.h
+    #     drop-in headers so consumers can compile code written against the
+    #     original libsecp256k1 API without changes.  They go into the flat
+    #     include/ root (same level as ufsecp_libbitcoin.h) so that both
+    #     #include <secp256k1.h> and the relative include inside
+    #     ufsecp_libbitcoin.h ("ufsecp_error.h") resolve correctly once
+    #     include\ufsecp\ is on the compiler path.
+    # -------------------------------------------------------------------------
+    $shimSrcDir = Join-Path $sourceDir "compat\libsecp256k1_shim\include"
+    $shimDstDir = Join-Path $stagingDir "x64\static\Release\include"
+    Get-ChildItem $shimSrcDir -Filter "*.h" | Copy-Item -Destination $shimDstDir -Force
+    Write-Host "Shim headers copied to staging."
 }
 
 # ---------------------------------------------------------------------------
