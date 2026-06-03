@@ -51,14 +51,11 @@ internal static class Targets
                     new XAttribute("Include",
                         @"$(MSBuildThisFileDirectory)package.xml"))),
 
-            // Base directories — evaluated lazily by MSBuild at build time
+            // Include dir declared as a property so both the unconditional group
+            // and the ufsecp\ sub-path can reference it cleanly.
             new XElement(Ns + "PropertyGroup",
                 new XElement(Ns + "UltrafastSecp256k1_IncludeDir",
-                    @"$(MSBuildThisFileDirectory)include\"),
-                new XElement(Ns + "UltrafastSecp256k1_StaticLibDir",
-                    @"$(MSBuildThisFileDirectory)..\..\lib\native\x64\$(Configuration)\static\"),
-                new XElement(Ns + "UltrafastSecp256k1_SharedLibDir",
-                    @"$(MSBuildThisFileDirectory)..\..\lib\native\x64\$(Configuration)\shared\")),
+                    @"$(MSBuildThisFileDirectory)include\")),
 
             // Include paths — only when linked and on the supported target.
             // Add both include\ and include\ufsecp\ so that headers inside
@@ -70,28 +67,22 @@ internal static class Targets
                     new XElement(Ns + "AdditionalIncludeDirectories",
                         @"$(UltrafastSecp256k1_IncludeDir);$(UltrafastSecp256k1_IncludeDir)ufsecp\;%(AdditionalIncludeDirectories)"))),
 
-            // Static: preprocessor define + lib directory
+            // Static: preprocessor define only.
+            // AdditionalDependencies uses full paths (see StaticLibGroup) so
+            // AdditionalLibraryDirectories is not needed and can be left empty —
+            // this matches VS property-grid display behaviour and the reference
+            // libbitcoin/secp256k1 package.targets approach.
             new XElement(Ns + "ItemDefinitionGroup",
                 new XAttribute("Condition",
                     $"'$(Linkage-UltrafastSecp256k1)' == 'static' And {PlatformCond}"),
                 new XElement(Ns + "ClCompile",
                     new XElement(Ns + "PreprocessorDefinitions",
-                        "UFSECP_STATIC;%(PreprocessorDefinitions)")),
-                new XElement(Ns + "Link",
-                    new XElement(Ns + "AdditionalLibraryDirectories",
-                        @"$(UltrafastSecp256k1_StaticLibDir);%(AdditionalLibraryDirectories)"))),
+                        "UFSECP_STATIC;%(PreprocessorDefinitions)"))),
 
             StaticLibGroup("Release"),
             StaticLibGroup("Debug"),
 
-            // Dynamic: lib directory
-            new XElement(Ns + "ItemDefinitionGroup",
-                new XAttribute("Condition",
-                    $"'$(Linkage-UltrafastSecp256k1)' == 'dynamic' And {PlatformCond}"),
-                new XElement(Ns + "Link",
-                    new XElement(Ns + "AdditionalLibraryDirectories",
-                        @"$(UltrafastSecp256k1_SharedLibDir);%(AdditionalLibraryDirectories)"))),
-
+            // Dynamic: full-path AdditionalDependencies (see SharedLibGroup).
             SharedLibGroup("Release"),
             SharedLibGroup("Debug"),
 
@@ -119,11 +110,11 @@ internal static class Targets
         string libDir = Path.Combine(
             Config.StagingDir, "x64", "static", config, "lib");
 
-        var names = ScanLibNames(libDir);
-        if (names.Count == 0)
+        var paths = ScanLibPaths(libDir, "x64", config, "static");
+        if (paths.Count == 0)
             Console.WriteLine($"WARNING: no .lib found for static/{config}");
 
-        string deps = string.Join(";", names) + ";%(AdditionalDependencies)";
+        string deps = string.Join(";", paths) + ";%(AdditionalDependencies)";
 
         return new XElement(Ns + "ItemDefinitionGroup",
             new XAttribute("Condition",
@@ -133,7 +124,7 @@ internal static class Targets
     }
 
     // -----------------------------------------------------------------------
-    // Shared (import lib) filenames
+    // Shared (import lib) full paths
     // -----------------------------------------------------------------------
 
     private static XElement SharedLibGroup(string config)
@@ -141,10 +132,9 @@ internal static class Targets
         string libDir = Path.Combine(
             Config.StagingDir, "x64", "shared", config, "lib");
 
-        // Only include .lib files (import libs), not .dll
-        var names = ScanLibNames(libDir);
+        var paths = ScanLibPaths(libDir, "x64", config, "shared");
 
-        string deps = string.Join(";", names) + ";%(AdditionalDependencies)";
+        string deps = string.Join(";", paths) + ";%(AdditionalDependencies)";
 
         return new XElement(Ns + "ItemDefinitionGroup",
             new XAttribute("Condition",
@@ -188,16 +178,22 @@ internal static class Targets
     // Helpers
     // -----------------------------------------------------------------------
 
-    /// <summary>Returns just the filenames (no paths) of all .lib files.</summary>
-    private static List<string> ScanLibNames(string dir)
+    /// <summary>
+    /// Returns full MSBuild paths for all .lib files in the staging dir.
+    /// Paths are package-relative using $(MSBuildThisFileDirectory), so VS
+    /// can resolve and display them correctly in AdditionalDependencies.
+    /// </summary>
+    private static List<string> ScanLibPaths(
+        string stagingLibDir, string arch, string config, string linkType)
     {
-        if (!Directory.Exists(dir))
+        if (!Directory.Exists(stagingLibDir))
             return new List<string>();
 
-        return Directory.GetFiles(dir, "*.lib")
-            .Select(Path.GetFileName)
-            .Where(n => n is not null)
-            .Select(n => n!)
+        // $(MSBuildThisFileDirectory) = build/native/ inside the package.
+        // Two levels up brings us to the package root, then into lib/native/.
+        return Directory.GetFiles(stagingLibDir, "*.lib")
+            .Select(f =>
+                $@"$(MSBuildThisFileDirectory)..\..\lib\native\{arch}\{config}\{linkType}\{Path.GetFileName(f)}")
             .ToList();
     }
 
