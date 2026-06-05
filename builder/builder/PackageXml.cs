@@ -22,7 +22,7 @@ internal static class PackageXml
             ##################################################################
             -->
             <ProjectSchemaDefinitions xmlns="clr-namespace:Microsoft.Build.Framework.XamlTypes;assembly=Microsoft.Build.Framework">
-              <Rule Name="Linkage-UltrafastSecp256k1-uiextension" PageTemplate="tool"
+              <Rule Name="Linkage-ultrafast-uiextension" PageTemplate="tool"
                     DisplayName="NuGet Dependencies" SwitchPrefix="/" Order="1">
                 <Rule.Categories>
                   <Category Name="UltrafastSecp256k1" DisplayName="UltrafastSecp256k1" />
@@ -30,7 +30,7 @@ internal static class PackageXml
                 <Rule.DataSource>
                   <DataSource Persistence="ProjectFile" ItemType="" />
                 </Rule.DataSource>
-                <EnumProperty Name="Linkage-UltrafastSecp256k1"
+                <EnumProperty Name="Linkage-ultrafast"
                               DisplayName="Linkage"
                               Description="How NuGet UltrafastSecp256k1 will be linked into the output of this project"
                               Category="UltrafastSecp256k1">

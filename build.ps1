@@ -4,7 +4,7 @@
     Build UltrafastSecp256k1 and package it as a NuGet package.
 
 .DESCRIPTION
-    Clones shrec/UltrafastSecp256k1 (branch: dev), builds with CMake and the
+    Clones shrec/UltrafastSecp256k1 (branch: main), builds with CMake and the
     Visual Studio 2026 generator (vc145) for x64 in Release/Debug x
     static/shared, installs to _staging/, then invokes the C# builder to
     produce the .nupkg.
@@ -13,10 +13,16 @@
     compiled for Win32/x86.
 
 .PARAMETER Version
-    Version override. Default: read from source VERSION.txt.
+    Full 4-part version override, e.g. "4.1.1.2".
+    Default: {VERSION.txt}.{PackagingRevision}.
+
+.PARAMETER PackagingRevision
+    Fourth version digit appended to the 3-part source version from VERSION.txt.
+    Increment when repackaging without a source rebuild (e.g. .targets fixes).
+    Ignored when -Version is specified explicitly.  Default: 0.
 
 .PARAMETER SourceBranch
-    Git branch to clone. Default: dev.
+    Git branch to clone. Default: main.
 
 .PARAMETER Generator
     CMake generator name. Default: "Visual Studio 18 2026".
@@ -35,17 +41,18 @@
     .\build.ps1 -Pack
 
 .EXAMPLE
-    # Source already cloned; rebuild and repack
-    .\build.ps1 -SkipClone -Pack
+    # Source already cloned; repackage with incremented revision
+    .\build.ps1 -SkipClone -SkipBuild -Pack -PackagingRevision 1
 
 .EXAMPLE
-    # Skip everything except packaging (staging already complete)
-    .\build.ps1 -SkipClone -SkipBuild -Pack -Version 4.1.0
+    # Explicit full version override
+    .\build.ps1 -SkipClone -SkipBuild -Pack -Version 4.1.1.0
 #>
 param(
-    [string] $Version      = "",
-    [string] $SourceBranch = "dev",
-    [string] $Generator    = "Visual Studio 18 2026",
+    [string] $Version           = "",
+    [int]    $PackagingRevision = 1,
+    [string] $SourceBranch      = "main",
+    [string] $Generator         = "Visual Studio 18 2026",
     [switch] $SkipClone,
     [switch] $SkipBuild,
     [switch] $Pack
@@ -140,15 +147,19 @@ Assert-Tool "git"
 # ---------------------------------------------------------------------------
 if (-not $SkipClone) {
     Write-Step "Source: UltrafastSecp256k1 (branch: $SourceBranch)"
+    # $ErrorActionPreference = "Continue" so git's informational stderr output
+    # (e.g. "Cloning into...") does not abort the script in PS 5.1.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     if (Test-Path $sourceDir) {
         Write-Host "    Pulling latest..."
         git -C $sourceDir pull --ff-only
-        if ($LASTEXITCODE -ne 0) { throw "git pull failed" }
     } else {
         git clone --branch $SourceBranch --depth 1 `
             "https://github.com/shrec/UltrafastSecp256k1.git" $sourceDir
-        if ($LASTEXITCODE -ne 0) { throw "git clone failed" }
     }
+    $ErrorActionPreference = $prev
+    if ($LASTEXITCODE -ne 0) { throw "git exited with code $LASTEXITCODE" }
 }
 
 # ---------------------------------------------------------------------------
@@ -159,7 +170,8 @@ if (-not $Version) {
     if (-not (Test-Path $versionFile)) {
         throw "VERSION.txt not found and no -Version parameter given."
     }
-    $Version = (Get-Content $versionFile -Raw).Trim()
+    $sourceVersion = (Get-Content $versionFile -Raw).Trim()
+    $Version = "$sourceVersion.$PackagingRevision"
 }
 Write-Host "Version: $Version"
 

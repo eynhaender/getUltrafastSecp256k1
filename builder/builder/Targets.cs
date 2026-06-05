@@ -8,7 +8,7 @@ using builder;
 /// Design (analogous to libbitcoin/secp256k1 packaging/nuget/package.targets):
 ///
 ///   - package.xml drives a "Linkage" drop-down in the VS project properties
-///     UI.  The resulting MSBuild property is $(Linkage-UltrafastSecp256k1).
+///     UI.  The resulting MSBuild property is $(Linkage-ultrafast).
 ///
 ///   - Include paths and lib dirs are only injected when a linkage mode is
 ///     selected (i.e. NOT "Not linked").
@@ -54,13 +54,11 @@ internal static class Targets
             // General: fired for any non-empty linkage (static or dynamic).
             // Both include\ and include\ufsecp\ are needed so that relative
             // includes inside ufsecp_libbitcoin.h (e.g. "ufsecp_error.h") resolve.
-            // AdditionalLibraryDirectories points at the flat lib dir so that
-            // AdditionalDependencies can use bare filenames with no path prefix.
             // WITH_ULTRAFAST lets consumer code conditionally compile the
             // UltrafastSecp256k1 code path.
             new XElement(Ns + "ItemDefinitionGroup",
                 new XAttribute("Condition",
-                    $"'$(Linkage-UltrafastSecp256k1)' != '' And {PlatformCond}"),
+                    $"'$(Linkage-ultrafast)' != '' And {PlatformCond}"),
                 new XElement(Ns + "ClCompile",
                     new XElement(Ns + "AdditionalIncludeDirectories",
                         @"$(MSBuildThisFileDirectory)include\;%(AdditionalIncludeDirectories)"),
@@ -75,7 +73,7 @@ internal static class Targets
             // Static: preprocessor define.
             new XElement(Ns + "ItemDefinitionGroup",
                 new XAttribute("Condition",
-                    $"'$(Linkage-UltrafastSecp256k1)' == 'static' And {PlatformCond}"),
+                    $"'$(Linkage-ultrafast)' == 'static' And {PlatformCond}"),
                 new XElement(Ns + "ClCompile",
                     new XElement(Ns + "PreprocessorDefinitions",
                         "UFSECP_STATIC;%(PreprocessorDefinitions)"))),
@@ -115,8 +113,8 @@ internal static class Targets
         var paths = new List<string>();
         if (Directory.Exists(Config.FlatLibDir))
         {
-            // Bare filenames only — AdditionalLibraryDirectories in the general
-            // group already points at lib\native\, so no path prefix is needed.
+            // Bare filenames — AdditionalLibraryDirectories in the general group
+            // points at lib\native\, so no path prefix is needed here.
             paths = Directory.GetFiles(Config.FlatLibDir, "*.lib")
                 .Where(f => Path.GetFileName(f).Contains(suffix))
                 .Select(f => Path.GetFileName(f))
@@ -130,7 +128,7 @@ internal static class Targets
 
         return new XElement(Ns + "ItemDefinitionGroup",
             new XAttribute("Condition",
-                $"'$(Linkage-UltrafastSecp256k1)' == 'static' And '$(Configuration)' == '{config}' And {PlatformCond}"),
+                $"'$(Linkage-ultrafast)' == 'static' And '$(Configuration)' == '{config}' And {PlatformCond}"),
             new XElement(Ns + "Link",
                 new XElement(Ns + "AdditionalDependencies", deps)));
     }
@@ -142,7 +140,7 @@ internal static class Targets
     private static XElement SharedLibGroup(string config) =>
         new XElement(Ns + "ItemDefinitionGroup",
             new XAttribute("Condition",
-                $"'$(Linkage-UltrafastSecp256k1)' == 'dynamic' And '$(Configuration)' == '{config}' And {PlatformCond}"),
+                $"'$(Linkage-ultrafast)' == 'dynamic' And '$(Configuration)' == '{config}' And {PlatformCond}"),
             new XElement(Ns + "Link",
                 new XElement(Ns + "AdditionalDependencies", "%(AdditionalDependencies)")));
 
