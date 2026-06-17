@@ -37,8 +37,16 @@ internal static class Config
     // Derived
     // -----------------------------------------------------------------------
 
-    /// <summary>NuGet package identifier, e.g. "UltrafastSecp256k1-vc145".</summary>
-    public static string PackageId => $"UltrafastSecp256k1-{Toolset}";
+    /// <summary>
+    /// NuGet package identifier, e.g. "ultrafastsecp256k1-vc145". Lowercase on
+    /// purpose: a mixed-case id leaves NuGet's C++ packages.config import cleanup
+    /// unable to remove the old &lt;Import&gt;/&lt;Error&gt; lines on upgrade (the
+    /// cased id in the .vcxproj vs NuGet's normalized lowercase id), which broke
+    /// upgrades for libbitcoin. The whole ecosystem (secp256k1_vc145,
+    /// libbitcoin-boost*) uses lowercase ids. The targets file name derives from
+    /// this, so it stays in sync for auto-import.
+    /// </summary>
+    public static string PackageId => $"ultrafastsecp256k1-{Toolset}";
 
     /// <summary>
     /// MSBuild $(PlatformToolset) the .targets conditions match on, derived from
