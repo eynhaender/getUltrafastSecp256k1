@@ -1,5 +1,12 @@
 # Changes
 
+## 4.3.0.3 (2026-06-17)
+
+- CUDA lib now built **self-contained** (`CUDA_SEPARABLE_COMPILATION OFF`, no `-rdc`):
+  a consumer links `secp256k1_cuda` + `cudart` with a plain MSVC link — no device-link
+  step / `cudadevrt` / CUDA-aware project required. (4.3.0.2's RDC lib needed the
+  consumer to device-link.) Single-TU lib, so whole-program device linking is fine.
+
 ## 4.3.0.2 (2026-06-17)
 
 - Optional **CUDA** support for the vc145 package: `build.ps1 -Cuda [-CudaArchitectures 89]`

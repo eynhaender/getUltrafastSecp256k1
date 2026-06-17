@@ -381,6 +381,20 @@ if (-not $SkipBuild) {
             Write-Host "Patched secp256k1.cuh: field_mul_small 'small' -> 'factor' (Windows macro collision)"
         }
 
+        # Build secp256k1_cuda_lib SELF-CONTAINED (CUDA_SEPARABLE_COMPILATION OFF
+        # -> no -rdc). With RDC on, the static lib carries relocatable device code
+        # that the CONSUMER must device-link (nvcc -dlink + cudadevrt) or hit
+        # unresolved __cudaRegisterLinkedBinary_*. As a single TU, the lib links
+        # its device code whole-program, so a consumer just links it + cudart.
+        # Idempotent. (Upstream forces it ON for its own multi-target GPU builds.)
+        $cudaCMake = Join-Path $sourceDir "src\cuda\CMakeLists.txt"
+        $cc = Get-Content $cudaCMake -Raw
+        if ($cc -match 'secp256k1_cuda_lib PROPERTIES[^)]*?CUDA_SEPARABLE_COMPILATION ON') {
+            $cc = $cc -replace '(secp256k1_cuda_lib PROPERTIES[^)]*?CUDA_SEPARABLE_COMPILATION )ON', '${1}OFF'
+            Set-Content -Path $cudaCMake -Value $cc -NoNewline -Encoding UTF8
+            Write-Host "Patched src/cuda/CMakeLists.txt: secp256k1_cuda_lib CUDA_SEPARABLE_COMPILATION OFF (self-contained)"
+        }
+
         $cudaBuildDir = Join-Path $buildRoot "x64_cuda"
         Write-Step "Configure  CUDA engine lib"
         Invoke-Cmake @(

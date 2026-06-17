@@ -175,7 +175,9 @@ internal static class Targets
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToList();
         deps.Add(cudaLib);
-        deps.Add("cudart.lib");   // from the consumer's CUDA Toolkit lib path
+        // Static CUDA runtime: no cudart DLL needed at run time (only an NVIDIA
+        // GPU + driver). cudart_static.lib comes from the consumer's CUDA Toolkit.
+        deps.Add("cudart_static.lib");
 
         string list = string.Join(";", deps) + ";%(AdditionalDependencies)";
         return new XElement(Ns + "ItemDefinitionGroup",

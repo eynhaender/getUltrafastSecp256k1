@@ -77,6 +77,24 @@ library-only CUDA build.
 
 ---
 
+## Note — `secp256k1_cuda_lib` separable compilation hurts external consumers
+
+`secp256k1_cuda_lib` is forced `CUDA_SEPARABLE_COMPILATION ON` (`-rdc=true`), both
+via the global default (`CMakeLists.txt` ~line 28) and the target property
+(~line 54-55). RDC is appropriate for the project's own multi-target GPU builds,
+but it makes the **static lib** hard to consume from a non-CMake / non-CUDA
+project: the relocatable device code requires the consumer to run a device-link
+step (`nvcc -dlink`) and link `cudadevrt`, else `__cudaRegisterLinkedBinary_*`
+unresolved. `secp256k1_cuda_lib` is a single translation unit, so it links its
+device code whole-program just fine with RDC **off**.
+
+**Suggested:** expose an option (e.g. `SECP256K1_CUDA_LIB_SELF_CONTAINED`) to build
+`secp256k1_cuda_lib` with `CUDA_SEPARABLE_COMPILATION OFF`, so a plain consumer
+can link `secp256k1_cuda` + `cudart` directly. (Our packaging patches the target
+property OFF.)
+
+---
+
 ## Note — vc145 / VS 2026 host with CUDA 13.3
 
 nvcc rejects MSVC 14.50 (VS 2026) as an unsupported host. Passing
