@@ -86,7 +86,12 @@ internal static class Targets
 
             // dynamic (*.lib) — placeholder; DLLs not shipped.
             LibGroup("dynamic", "lib", "Release"),
-            LibGroup("dynamic", "lib", "Debug")
+            LibGroup("dynamic", "lib", "Debug"),
+
+            // cuda — CPU static libs + secp256k1_cuda + cudart. Emitted only when
+            // a *.cuda.lib was built (-Cuda); null is ignored by XElement otherwise.
+            CudaLibGroup("Release"),
+            CudaLibGroup("Debug")
         );
 
         var doc = new XDocument(
@@ -141,6 +146,41 @@ internal static class Targets
         return new XElement(Ns + "ItemDefinitionGroup",
             new XAttribute("Condition",
                 $"{PlatformCond} And '$(Linkage-ultrafast)' == '{linkage}' And $(Configuration.IndexOf('{config}')) != -1"),
+            new XElement(Ns + "Link",
+                new XElement(Ns + "AdditionalDependencies", list)));
+    }
+
+    /// <summary>True if build.ps1 -Cuda produced a secp256k1_cuda lib.</summary>
+    public static bool HasCuda() =>
+        Directory.Exists(Config.FlatLibDir) &&
+        Directory.GetFiles(Config.FlatLibDir, "*.cuda.lib").Length > 0;
+
+    // cuda linkage: the clean (/GL-free) CPU static libs + the CUDA engine lib +
+    // cudart (the CUDA runtime import lib, supplied by the consumer's CUDA
+    // Toolkit on its lib path). Returns null when no *.cuda.lib was built, so the
+    // group is omitted entirely for CPU-only packages.
+    private static XElement? CudaLibGroup(string config)
+    {
+        if (!HasCuda()) return null;
+        string rt = config == "Release" ? "-mt-s-" : "-mt-sgd-";
+
+        string? cudaLib = Directory.GetFiles(Config.FlatLibDir, "*.cuda.lib")
+            .Select(f => Path.GetFileName(f))
+            .FirstOrDefault(n => n.Contains(rt));
+        if (cudaLib is null) return null;
+
+        var deps = Directory.GetFiles(Config.FlatLibDir, "*.static.lib")
+            .Select(f => Path.GetFileName(f))
+            .Where(n => n.Contains(rt))
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+        deps.Add(cudaLib);
+        deps.Add("cudart.lib");   // from the consumer's CUDA Toolkit lib path
+
+        string list = string.Join(";", deps) + ";%(AdditionalDependencies)";
+        return new XElement(Ns + "ItemDefinitionGroup",
+            new XAttribute("Condition",
+                $"{PlatformCond} And '$(Linkage-ultrafast)' == 'cuda' And $(Configuration.IndexOf('{config}')) != -1"),
             new XElement(Ns + "Link",
                 new XElement(Ns + "AdditionalDependencies", list)));
     }

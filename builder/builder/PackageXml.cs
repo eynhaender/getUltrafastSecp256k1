@@ -13,8 +13,13 @@ internal static class PackageXml
         string targetsDir = Path.Combine(packageDir, "build", "native");
         Directory.CreateDirectory(targetsDir);
 
+        // The cuda linkage is only offered when -Cuda actually produced a CUDA lib.
+        string cudaEnum = Targets.HasCuda()
+            ? "\n              <EnumValue Name=\"cuda\"    DisplayName=\"Static + CUDA (GPU; requires CUDA Toolkit)\" />"
+            : "";
+
         string content =
-            """
+            $"""
             <?xml version="1.0" encoding="utf-8"?>
             <!--
             ##################################################################
@@ -37,7 +42,7 @@ internal static class PackageXml
                   <EnumValue Name=""        DisplayName="Not linked" />
                   <EnumValue Name="static"  DisplayName="Static (LIB)" />
                   <EnumValue Name="ltcg"    DisplayName="Static LTCG (/GL, link /LTCG)" />
-                  <EnumValue Name="dynamic" DisplayName="Dynamic (DLL)" />
+                  <EnumValue Name="dynamic" DisplayName="Dynamic (DLL)" />{cudaEnum}
                 </EnumProperty>
               </Rule>
             </ProjectSchemaDefinitions>

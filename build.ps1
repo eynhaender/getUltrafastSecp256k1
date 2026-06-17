@@ -55,6 +55,8 @@ param(
     [ValidateSet("vc145", "vc143")]
     [string] $Toolset           = "vc145",
     [string] $Generator         = "",
+    [switch] $Cuda,
+    [string] $CudaArchitectures  = "89",
     [switch] $SkipClone,
     [switch] $SkipBuild,
     [switch] $Pack
@@ -80,6 +82,31 @@ $tc = $toolsets[$Toolset]
 if (-not $Generator) { $Generator = $tc.Generator }
 $cmakeToolset = $tc.CMakeToolset
 Write-Host "Toolset: $Toolset  (generator: $Generator, -T $cmakeToolset)"
+
+# ---------------------------------------------------------------------------
+# CUDA (optional, -Cuda) is built as its OWN Release-only library, decoupled
+# from the CPU static/ltcg matrix. Rationale: the CUDA/GPU path forces -O3 (->
+# host /O2) which collides with Debug /RTC1, and pulling the GPU impl into the
+# CPU CABI breaks the clean CPU libs. Keeping it separate yields clean CPU libs
+# plus a standalone secp256k1_cuda lib for the package's `cuda` linkage.
+#
+# nvcc rejects the v145 host (MSVC 14.50); we bypass its version gate with
+# -allow-unsupported-compiler on EVERY nvcc call via NVCC_PREPEND_FLAGS. The VS
+# CUDA MSBuild integration must be present for the generator (copied into
+# <VS>\MSBuild\Microsoft\VC\<ver>\BuildCustomizations\), and the toolkit dir is
+# passed to it via the toolset field  -T <toolset>,cuda=<dir>.
+# ---------------------------------------------------------------------------
+if ($Cuda) {
+    $cudaRoot = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
+    $cudaDir  = Get-ChildItem $cudaRoot -Directory -Filter "v*" -ErrorAction SilentlyContinue |
+        Sort-Object Name | Select-Object -Last 1 | ForEach-Object FullName
+    if (-not $cudaDir) { throw "-Cuda: no CUDA Toolkit found under $cudaRoot" }
+    $env:CUDA_PATH = $cudaDir
+    $env:PATH = (Join-Path $cudaDir "bin") + ";" + $env:PATH
+    $env:NVCC_PREPEND_FLAGS = "-allow-unsupported-compiler"
+    $cudaToolset = "$cmakeToolset,cuda=$cudaDir"   # only for the separate CUDA build
+    Write-Host "CUDA: $cudaDir  (arch $CudaArchitectures, host $Toolset via -allow-unsupported-compiler)"
+}
 
 # ---------------------------------------------------------------------------
 # Paths -- per-toolset subtree so the two pipelines stay isolated.
@@ -335,6 +362,46 @@ if (-not $SkipBuild) {
     }
 
     # -------------------------------------------------------------------------
+    # 3b-ii. CUDA engine lib (optional, -Cuda) — its OWN Release-only build dir,
+    #     decoupled from the CPU matrix (see the -Cuda note at the top). Build
+    #     ONLY the secp256k1_cuda_lib library target: src/cuda also adds many
+    #     bench/test executables unconditionally that fail to device-link here.
+    # -------------------------------------------------------------------------
+    if ($Cuda) {
+        # Patch an upstream Windows bug: the param `small` in field_mul_small
+        # collides with the Windows SDK macro `#define small char` (rpcndr.h),
+        # which is pulled into the GPU host compile. Rename it to `factor`.
+        # Idempotent; reported upstream in UPSTREAM_ISSUE_cuda_windows.md.
+        $cuh = Join-Path $sourceDir "src\cuda\include\secp256k1.cuh"
+        $cuhText = Get-Content $cuh -Raw
+        if ($cuhText.Contains("uint32_t small, FieldElement* r")) {
+            $cuhText = $cuhText.Replace("uint32_t small, FieldElement* r", "uint32_t factor, FieldElement* r").
+                                 Replace("static_cast<uint64_t>(small)", "static_cast<uint64_t>(factor)")
+            Set-Content -Path $cuh -Value $cuhText -NoNewline -Encoding UTF8
+            Write-Host "Patched secp256k1.cuh: field_mul_small 'small' -> 'factor' (Windows macro collision)"
+        }
+
+        $cudaBuildDir = Join-Path $buildRoot "x64_cuda"
+        Write-Step "Configure  CUDA engine lib"
+        Invoke-Cmake @(
+            "-S", $sourceDir, "-B", $cudaBuildDir,
+            "-G", $Generator, "-A", "x64", "-T", $cudaToolset,
+            "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",   # /MT, matches the CPU libs
+            "-DSECP256K1_BUILD_CPU=ON",
+            "-DSECP256K1_BUILD_CABI=OFF",
+            "-DSECP256K1_BUILD_SHIM=OFF",
+            "-DSECP256K1_BUILD_CUDA=ON",
+            ("-DCMAKE_CUDA_ARCHITECTURES=" + $CudaArchitectures),
+            "-DSECP256K1_BUILD_TESTS=OFF",
+            "-DSECP256K1_BUILD_BENCH=OFF",
+            "-DSECP256K1_BUILD_EXAMPLES=OFF"
+        )
+        Write-Step "Build  CUDA engine lib (Release, library target only)"
+        Invoke-Cmake @("--build", $cudaBuildDir, "--config", "Release", "--parallel",
+            "--target", "secp256k1_cuda_lib")
+    }
+
+    # -------------------------------------------------------------------------
     # 3b-i. ufsecp C ABI headers
     #
     #     cmake install only copies include/secp256k1/ (the C++ headers).
@@ -429,6 +496,15 @@ if (-not $SkipBuild) {
         Copy-Flat (Join-Path $D "fastsecp256k1d.lib") "fastsecp256k1"      "mt-sgd" $variant
         Copy-Flat (Join-Path $D "ufsecp_sd.lib")       "ufsecp_s"           "mt-sgd" $variant
         Copy-Flat $brD                                  "ufsecp_lbtc_bridge" "mt-sgd" $variant
+    }
+
+    # CUDA engine lib (when -Cuda): the GPU companion lib, shipped under the
+    # package's `cuda` linkage. Release-only, built in its own x64_cuda dir.
+    if ($Cuda) {
+        $cudaBuild = Join-Path $buildRoot "x64_cuda"
+        $cudaR = Get-ChildItem -Path $cudaBuild -Recurse -Filter "secp256k1_cuda_lib*.lib" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -like "*\Release\*" } | Select-Object -First 1
+        if ($cudaR) { Copy-Flat $cudaR.FullName "secp256k1_cuda" "mt-s" "cuda" } else { Write-Warning "CUDA: secp256k1_cuda_lib (Release) not found under $cudaBuild" }
     }
 }
 

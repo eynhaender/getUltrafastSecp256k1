@@ -1,5 +1,19 @@
 # Changes
 
+## 4.3.0.2 (2026-06-17)
+
+- Optional **CUDA** support for the vc145 package: `build.ps1 -Cuda [-CudaArchitectures 89]`
+  builds a Release `secp256k1_cuda` lib in its own decoupled build dir and adds a
+  `cuda` linkage (CPU static libs + `secp256k1_cuda` + `cudart`). Requires the CUDA
+  Toolkit; nvcc runs against the v145 host via `-allow-unsupported-compiler`
+  (`NVCC_PREPEND_FLAGS`) with the toolkit dir passed as `-T v145,cuda=<dir>` and the
+  VS CUDA MSBuild integration copied into VS 2026's BuildCustomizations.
+- CPU `static` / `ltcg` / `dynamic` variants unchanged; CUDA is decoupled so the
+  CPU libs stay clean and the Debug-CUDA upstream issues are avoided.
+- Local patch for an upstream Windows bug (`small` identifier vs the Windows
+  `#define small char` macro) — see `UPSTREAM_ISSUE_cuda_windows.md`.
+- Built CPU-only by default (`build.ps1 -Pack`); CUDA is opt-in.
+
 ## 4.3.0.1 (2026-06-17)
 
 - vc145 retargeted to **main 4.3.0** (the libbitcoin shim + bridge fixes from the
