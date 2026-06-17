@@ -4,7 +4,7 @@
     Build UltrafastSecp256k1 and package it as a NuGet package.
 
 .DESCRIPTION
-    Clones shrec/UltrafastSecp256k1 (branch: dev), builds with CMake and the
+    Clones shrec/UltrafastSecp256k1 (branch: main), builds with CMake and the
     Visual Studio 2026 generator (vc145) for x64 in Release/Debug x
     static/shared, installs to _staging/, then invokes the C# builder to
     produce the .nupkg.
@@ -22,7 +22,7 @@
     Ignored when -Version is specified explicitly.  Default: 0.
 
 .PARAMETER SourceBranch
-    Git branch to clone. Default: dev (carries the libbitcoin shim + bridge fixes).
+    Git branch to clone. Default: main (4.3.0; the libbitcoin shim + bridge fixes merged from dev).
 
 .PARAMETER Generator
     CMake generator name. Default: "Visual Studio 18 2026".
@@ -51,7 +51,7 @@
 param(
     [string] $Version           = "",
     [int]    $PackagingRevision = 1,
-    [string] $SourceBranch      = "dev",
+    [string] $SourceBranch      = "main",
     [ValidateSet("vc145", "vc143")]
     [string] $Toolset           = "vc145",
     [string] $Generator         = "",
@@ -202,34 +202,19 @@ Write-Host "Version: $Version"
 # ---------------------------------------------------------------------------
 if (-not $SkipBuild) {
 
-    # -------------------------------------------------------------------------
-    # Gate the engine's hardcoded MSVC /GL (whole-program optimization) behind a
-    # cache flag so we can produce two static variants from the same source:
-    #   * static (.static.lib) — /GL OFF: clean, fast consumer link, no
-    #     "module compiled with /GL ... restarting link with /LTCG" warning.
-    #   * ltcg   (.ltcg.lib)   — /GL ON:  max runtime perf, consumer links /LTCG.
-    # Idempotent: only rewrites the line if it is still the unconditional form.
-    # -------------------------------------------------------------------------
-    $rootCml = Join-Path $sourceDir "CMakeLists.txt"
-    $cml = Get-Content $rootCml -Raw
-    $glOld = '$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:C,CXX>>:/GL>'
-    $glNew = '$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:C,CXX>,$<STREQUAL:${SECP256K1_MSVC_WHOLE_PROGRAM},ON>>:/GL>'
-    if ($cml.Contains($glOld)) {
-        $cml = $cml.Replace($glOld, $glNew)
-        Set-Content -Path $rootCml -Value $cml -NoNewline -Encoding UTF8
-        Write-Host "Patched: gated MSVC /GL behind SECP256K1_MSVC_WHOLE_PROGRAM"
-    }
-
     $archs = @(
         [pscustomobject]@{ CMakeArch = "x64"; Dir = "x64" }
     )
 
     # Two STATIC variants (libbitcoin links static only; shared/DLL is not
-    # shipped). They differ solely by MSVC whole-program optimization (/GL),
-    # which selects the .static.lib vs .ltcg.lib package slot.
+    # shipped). They differ solely by MSVC whole-program optimization, driven by
+    # the engine's native option SECP256K1_MSVC_WPO (/GL + /LTCG + /OPT:REF,ICF):
+    #   * static (.static.lib) — WPO OFF: no /GL, clean fast consumer link, no
+    #     "module compiled with /GL ... restarting link with /LTCG" warning.
+    #   * ltcg   (.ltcg.lib)   — WPO ON:  /GL whole-program, consumer links /LTCG.
     $linkTypes = @(
-        [pscustomobject]@{ WholeProgram = "OFF"; Dir = "static" }
-        [pscustomobject]@{ WholeProgram = "ON";  Dir = "ltcg" }
+        [pscustomobject]@{ Wpo = "OFF"; Dir = "static" }
+        [pscustomobject]@{ Wpo = "ON";  Dir = "ltcg" }
     )
 
     foreach ($arch in $archs) {
@@ -252,8 +237,8 @@ if (-not $SkipBuild) {
                 '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>',
                 # Static libs only (shared/DLL not shipped).
                 "-DSECP256K1_BUILD_SHARED=OFF",
-                # /GL on for the ltcg variant, off for the static variant.
-                ("-DSECP256K1_MSVC_WHOLE_PROGRAM=" + $link.WholeProgram),
+                # WPO (/GL) on for the ltcg variant, off for the static variant.
+                ("-DSECP256K1_MSVC_WPO=" + $link.Wpo),
                 # Components to build
                 "-DSECP256K1_BUILD_CPU=ON",
                 "-DSECP256K1_BUILD_CABI=ON",

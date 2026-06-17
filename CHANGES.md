@@ -1,5 +1,15 @@
 # Changes
 
+## 4.3.0.1 (2026-06-17)
+
+- vc145 retargeted to **main 4.3.0** (the libbitcoin shim + bridge fixes from the
+  4.1.1.x dev line are now merged into main; default source branch back to `main`)
+- Same package shape: static + ltcg variants, x64, Release/Debug; CPU only
+  (CUDA not included — needs the CUDA Toolkit + a vc143/VS2022 host; nvcc does
+  not support vc145/VS2026)
+- Also available as the multi-toolset pipeline: `-Toolset vc143` builds the
+  VS 2022 equivalent
+
 ## 4.1.1.7 (2026-06-13)
 
 - Rebuilt from dev tip `2d58f70`, incl. shim fix `684141e` (key ECDSA cache by full pubkey)
