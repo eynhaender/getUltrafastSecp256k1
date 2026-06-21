@@ -1,5 +1,13 @@
 # Changes
 
+## 4.4.0.1 (2026-06-21)
+
+- vc145 rebuilt from **dev 4.4.0** (tip `d300e8cb`; engine + bridge updates incl.
+  the libbitcoin batch cancellation token). CPU `static`/`ltcg`/`dynamic` + the
+  self-contained `cuda` linkage (no `-rdc`, `cudart_static` → consumer links with
+  plain MSVC, runs with only an NVIDIA GPU + driver). Vectors green on both
+  variants; `/GL` gate correct.
+
 ## 4.3.0.3 (2026-06-17)
 
 - CUDA lib now built **self-contained** (`CUDA_SEPARABLE_COMPILATION OFF`, no `-rdc`):
