@@ -1,5 +1,12 @@
 # Changes
 
+## 4.4.0.2 (2026-06-22)
+
+- vc145 rebuilt from latest **dev** (tip `21c4a478`; multithreaded `_mt` verify
+  twins for the libbitcoin bridge + new `ufsecp_cancel.h` / engine updates).
+  CPU `static`/`ltcg`/`dynamic` + self-contained `cuda` linkage. Vectors green on
+  both variants; `/GL` gate correct.
+
 ## 4.4.0.1 (2026-06-21)
 
 - vc145 rebuilt from **dev 4.4.0** (tip `d300e8cb`; engine + bridge updates incl.
