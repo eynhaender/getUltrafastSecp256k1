@@ -40,9 +40,9 @@ internal static class PackageXml
                               Description="How NuGet UltrafastSecp256k1 will be linked into the output of this project"
                               Category="UltrafastSecp256k1">
                   <EnumValue Name=""        DisplayName="Not linked" />
+                  <EnumValue Name="dynamic" DisplayName="Dynamic (DLL)" />
                   <EnumValue Name="static"  DisplayName="Static (LIB)" />
-                  <EnumValue Name="ltcg"    DisplayName="Static LTCG (/GL, link /LTCG)" />
-                  <EnumValue Name="dynamic" DisplayName="Dynamic (DLL)" />{cudaEnum}
+                  <EnumValue Name="ltcg"    DisplayName="Static using link time compile generation (LTCG)" />{cudaEnum}
                 </EnumProperty>
               </Rule>
             </ProjectSchemaDefinitions>

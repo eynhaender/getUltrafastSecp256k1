@@ -44,8 +44,14 @@ internal static class Targets
         CopyDirectory(headerSrc, headerDst);
 
         // General block ClCompile: WITH_ULTRAFAST + flat include\, and (for any
-        // non-dynamic linkage) UFSECP_STATIC_LIB so ufsecp.h drops the
-        // __declspec(dllimport) — the macro must match ufsecp_version.h exactly.
+        // non-dynamic linkage) the two static-consumption macros:
+        //   SECP256K1_STATIC  — the shipped libsecp256k1-compatible shim header
+        //                       (secp256k1.h) drops __declspec(dllimport) (matches
+        //                       how the real secp256k1 NuGet package defines it).
+        //   UFSECP_STATIC_LIB — the ufsecp C ABI header (ufsecp_version.h) drops
+        //                       __declspec(dllimport).
+        // Without these a static consumer links against __imp_secp256k1_* /
+        // __imp_ufsecp_* import symbols that the static libs don't provide.
         var generalCl = new XElement(Ns + "ClCompile",
             new XElement(Ns + "PreprocessorDefinitions",
                 "WITH_ULTRAFAST;%(PreprocessorDefinitions)"),
@@ -55,7 +61,7 @@ internal static class Targets
         var generalClStatic = new XElement(Ns + "ClCompile",
             new XAttribute("Condition", "'$(Linkage-ultrafast)' != 'dynamic'"),
             new XElement(Ns + "PreprocessorDefinitions",
-                "UFSECP_STATIC_LIB;%(PreprocessorDefinitions)"));
+                "SECP256K1_STATIC;UFSECP_STATIC_LIB;%(PreprocessorDefinitions)"));
 
         var project = new XElement(Ns + "Project",
 
