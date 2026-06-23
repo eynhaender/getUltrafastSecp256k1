@@ -1,12 +1,15 @@
 # Changes
 
-## 4.4.0.3 (2026-06-22)
+## 4.4.0.4 (2026-06-23)
 
+- Rebuilt from latest **dev** (tip `214dcf7c`): MSVC FE52-compute ECDSA/Schnorr
+  verify (libsecp parity), batch-verify persistent pool, bridge BIP-352 batch SP
+  scan + 8-byte prefix match, audit fixes.
 - **Define `SECP256K1_STATIC`** (alongside `UFSECP_STATIC_LIB`) for non-dynamic
   linkage. The package ships the libsecp256k1-compatible shim `secp256k1.h`, whose
   Windows visibility guard needs `SECP256K1_STATIC` to drop `__declspec(dllimport)`
   — without it a standalone static consumer links against `__imp_secp256k1_*`.
-  Matches how the real `secp256k1` NuGet package defines it. Same binaries as 4.4.0.2.
+  Matches how the real `secp256k1` NuGet package defines it.
 - package.xml dropdown order/wording aligned to the `secp256k1` package (`""`,
   dynamic, static, ltcg) + our `cuda`.
 
